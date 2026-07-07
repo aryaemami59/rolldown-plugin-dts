@@ -23,7 +23,21 @@ import type {
 const ts = requireTS()
 const debug = createDebug('rolldown-plugin-dts:tsc-build')
 
-// Emit file using `tsc --build` mode.
+/**
+ * Emit file using
+ * {@linkcode https://www.typescriptlang.org/docs/handbook/project-references.html#build-mode-for-typescript | tsc --build}
+ * mode. This mode is used when the {@linkcode TscOptions.build | build} option
+ * is set to `true`. It uses the
+ * {@linkcode ts.createSolutionBuilder | TypeScript solution builder} API to
+ * build the project and its references, and then reads the emitted declaration
+ * file and source map from the file system. This mode is faster than the
+ * `tsc` mode when there are multiple projects or references, but it requires a
+ * {@linkcode https://www.typescriptlang.org/docs/handbook/tsconfig-json.html | tsconfig.json}
+ * file with the correct configuration.
+ *
+ * @param tscOptions - The options for emitting the declaration file.
+ * @returns The result of the emit operation, including the emitted code, source map, and any errors that occurred.
+ */
 export function tscEmitBuild(tscOptions: TscOptions): TscResult {
   const {
     id,
@@ -134,6 +148,18 @@ export function tscEmitBuild(tscOptions: TscOptions): TscResult {
   }
 }
 
+/**
+ * Returns the cached {@linkcode SourceFileToProjectMap} for the given
+ * `tsconfig`, building it first via {@linkcode buildProjects()} if it has not
+ * been built yet in this {@linkcode context}.
+ *
+ * @param context - The shared compiler context that holds the project cache.
+ * @param fsSystem - The TypeScript file-system abstraction to pass through to the builder.
+ * @param tsconfig - Absolute path to the root {@linkcode https://www.typescriptlang.org/docs/handbook/tsconfig-json.html | tsconfig.json} file.
+ * @param force - If `true`, forces a full rebuild, bypassing any existing `.tsbuildinfo` cache.
+ * @param sourcemap - Whether declaration maps should be emitted.
+ * @returns A map from resolved source-file path to the {@linkcode ParsedProject | project} that owns it.
+ */
 function getOrBuildProjects(
   context: TscContext,
   fsSystem: System,
@@ -153,7 +179,15 @@ function getOrBuildProjects(
 }
 
 /**
- * Use TypeScript compiler to build all projects referenced
+ * Uses the TypeScript solution builder API to build all projects referenced
+ * from the root `tsconfig` file and returns a map from each source file to the
+ * {@linkcode ParsedProject | project} that owns it.
+ *
+ * @param fsSystem - The TypeScript file-system abstraction used by the builder.
+ * @param tsconfig - Absolute path to the root {@linkcode https://www.typescriptlang.org/docs/handbook/tsconfig-json.html | tsconfig.json} file.
+ * @param force - If `true`, forces a full rebuild instead of using cached `.tsbuildinfo` artifacts.
+ * @param sourcemap - Whether declaration maps (`.d.ts.map`) should be emitted.
+ * @returns A map from resolved source-file path to the {@linkcode ParsedProject | project} that owns it.
  */
 function buildProjects(
   fsSystem: System,
@@ -205,7 +239,14 @@ function buildProjects(
 }
 
 /**
- * Collects all referenced projects from the given entry tsconfig file.
+ * Collects all referenced projects from the given entry `tsconfig` file by
+ * traversing the project-reference graph in depth-first order.
+ *
+ * @param rootTsconfigPath - Absolute path to the root {@linkcode https://www.typescriptlang.org/docs/handbook/tsconfig-json.html | tsconfig.json} to start from.
+ * @param fsSystem - The TypeScript file-system abstraction used for reading config files.
+ * @param force - Passed through to {@linkcode patchCompilerOptions()} to suppress redundant warnings during forced rebuilds.
+ * @param sourcemap - Whether declaration maps should be requested for each project.
+ * @returns An ordered array of every {@linkcode ParsedProject | project} reachable from the root config (including the root itself), with compiler options already patched for declaration emit.
  */
 function collectProjectGraph(
   rootTsconfigPath: string,
@@ -241,6 +282,16 @@ function collectProjectGraph(
   return projects
 }
 
+/**
+ * Reads and parses the TypeScript configuration at {@linkcode tsconfigPath}
+ * using
+ * {@linkcode ts.getParsedCommandLineOfConfigFile | getParsedCommandLineOfConfigFile()}.
+ *
+ * @param tsconfigPath - Absolute path to the {@linkcode https://www.typescriptlang.org/docs/handbook/tsconfig-json.html | tsconfig.json} file to parse.
+ * @param fsSystem - The TypeScript file-system abstraction used to read the config file.
+ * @returns The parsed command-line object if successful, or `undefined` if the file could not be read.
+ * @throws An {@linkcode Error} if any unrecoverable diagnostic is emitted while parsing the config.
+ */
 function parseTsconfig(
   tsconfigPath: string,
   fsSystem: System,
@@ -267,11 +318,18 @@ function parseTsconfig(
   return parsedConfig
 }
 
-// To ensure we can get `.d.ts` and `.d.ts.map` files from `tsc --build` mode,
-// we need to enforce certain compiler options. Notice that changing compiler
-// options will invalidate the cache, so it's better to set the correct value in
-// tsconfig files in the first place. Therefore, we print some warnings if the
-// values are not set correctly.
+/**
+ * To ensure we can get `.d.ts` and `.d.ts.map` files from
+ * {@linkcode https://www.typescriptlang.org/docs/handbook/project-references.html#build-mode-for-typescript | tsc --build}
+ * mode, we need to enforce certain compiler options. Notice that changing
+ * compiler options will invalidate the cache, so it's better to set the
+ * correct value in `tsconfig` files in the first place. Therefore, we print
+ * some warnings if the values are not set correctly.
+ *
+ * @param options - The original {@linkcode ts.CompilerOptions | compilerOptions} from `tsconfig`.
+ * @param extraOptions - The extra options for patching the {@linkcode ts.CompilerOptions | compilerOptions}, including the `tsconfigPath` for better warning message, and a `force` flag to skip warnings.
+ * @returns The patched {@linkcode ts.CompilerOptions | compilerOptions} with the necessary options for emitting declaration files.
+ */
 function patchCompilerOptions(
   options: CompilerOptions,
   extraOptions: {
@@ -315,6 +373,13 @@ function patchCompilerOptions(
   return options
 }
 
+/**
+ * A {@linkcode CreateProgram} factory used by the TypeScript solution builder
+ * that wraps
+ * {@linkcode ts.createEmitAndSemanticDiagnosticsBuilderProgram | createEmitAndSemanticDiagnosticsBuilderProgram()}
+ * with {@linkcode patchCompilerOptions()} applied to the resolved compiler
+ * options, ensuring `declaration` is always enabled during solution builds.
+ */
 const createProgramWithPatchedCompilerOptions: CreateProgram<
   EmitAndSemanticDiagnosticsBuilderProgram
 > = (rootNames, options, ...args) => {

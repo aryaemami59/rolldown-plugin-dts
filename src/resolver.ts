@@ -9,22 +9,29 @@ import type { Plugin, ResolvedId } from 'rolldown'
 
 const debug = createDebug('rolldown-plugin-dts:resolver')
 
-export function createDtsResolvePlugin({
-  cwd,
-  tsconfig,
-  tsconfigRaw,
-  resolver,
-  sideEffects,
-  volarContext,
-}: Pick<
-  OptionsResolved,
-  | 'cwd'
-  | 'tsconfig'
-  | 'tsconfigRaw'
-  | 'resolver'
-  | 'sideEffects'
-  | 'volarContext'
->): Plugin {
+/**
+ * Creates the {@linkcode Plugin | Rolldown plugin} that resolves imports
+ * inside `.d.ts` files to either other declaration files or source files that
+ * need their own `.d.ts` generated. Uses the resolver strategy selected by
+ * {@linkcode OptionsResolved.resolver | resolver}.
+ *
+ * @param resolvedOptions - Resolved options controlling the resolver strategy and `tsconfig` lookup path.
+ * @returns A {@linkcode Plugin | Rolldown plugin} that registers a {@linkcode Plugin.resolveId | resolveId} hook for imports inside `.d.ts` files.
+ */
+export function createDtsResolvePlugin(
+  resolvedOptions: Pick<
+    OptionsResolved,
+    | 'cwd'
+    | 'tsconfig'
+    | 'tsconfigRaw'
+    | 'resolver'
+    | 'sideEffects'
+    | 'volarContext'
+  >,
+): Plugin {
+  const { cwd, tsconfig, tsconfigRaw, resolver, sideEffects, volarContext } =
+    resolvedOptions
+
   function isSourceFile(id: string) {
     return RE_TS.test(id) || RE_JSON.test(id) || volarContext?.isVolarFile(id)
   }
@@ -115,6 +122,17 @@ export function createDtsResolvePlugin({
     },
   }
 
+  /**
+   * Resolves the declaration-file path for an {@linkcode id} import inside a
+   * `.d.ts` file by dispatching to either the `'tsc'` or `'oxc'` resolver
+   * strategy and falling back to {@linkcode rolldownResolution} when the
+   * chosen resolver returns nothing.
+   *
+   * @param id - The import specifier to resolve.
+   * @param importer - The absolute path of the importing `.d.ts` file.
+   * @param rolldownResolution - Rolldown's own resolution result, used as a fallback when the chosen resolver cannot find a match.
+   * @returns The resolved file path (either a declaration file or a source file needing `.d.ts` generation), or `null` if unresolvable.
+   */
   async function resolveDtsPath(
     id: string,
     importer: string,
@@ -156,6 +174,13 @@ export function createDtsResolvePlugin({
   }
 }
 
+/**
+ * Returns `true` if {@linkcode id} looks like a relative or absolute file path
+ * rather than a bare module specifier.
+ *
+ * @param id - The module identifier to test.
+ * @returns `true` when {@linkcode id} starts with `'.'` or is an absolute path.
+ */
 function isFilePath(id: string) {
   return id.startsWith('.') || path.isAbsolute(id)
 }

@@ -10,6 +10,12 @@ import type { Logger } from './options.ts'
 const require = createRequire(import.meta.url)
 const debug = createDebug('rolldown-plugin-dts:tsgo')
 
+/**
+ * Checks whether the installed `typescript` package is TypeScript 7.0 (the
+ * Go-based compiler).
+ *
+ * @returns `true` if the installed `typescript` package reports version `7.0`, otherwise `false` (including when TypeScript is not installed).
+ */
 export function isTS70Installed(): boolean {
   try {
     const { versionMajorMinor } = require('typescript')
@@ -18,6 +24,12 @@ export function isTS70Installed(): boolean {
   return false
 }
 
+/**
+ * Promisified wrapper around {@linkcode spawn} that resolves when the child
+ * process exits and rejects if the process emits an error.
+ *
+ * @param args - Arguments forwarded verbatim to {@linkcode spawn}.
+ */
 const spawnAsync = (...args: Parameters<typeof spawn>) =>
   new Promise<void>((resolve, reject) => {
     const child = spawn(...args)
@@ -27,6 +39,15 @@ const spawnAsync = (...args: Parameters<typeof spawn>) =>
 
 let tsgoPathCache: string | undefined
 
+/**
+ * Resolves the path to the `tsgo` binary bundled inside the `typescript`
+ * package (when TypeScript 7.0 is installed) or the
+ * {@linkcode https://github.com/microsoft/typescript-go | @typescript/native-preview}
+ * package. The result is cached for subsequent calls.
+ *
+ * @param logger - The logger used to report which package is used to emit types.
+ * @returns The absolute path to the `tsgo` executable.
+ */
 export async function getTsgoPathFromNodeModules(
   logger: Logger,
 ): Promise<string> {
@@ -48,11 +69,36 @@ export async function getTsgoPathFromNodeModules(
   return (tsgoPathCache = getExePath())
 }
 
+/**
+ * A handle to the temporary directory that `tsgo` emitted declaration files
+ * into, along with a cleanup function to remove it.
+ */
 export interface TsgoContext {
+  /**
+   * The absolute path to the temporary directory containing the emitted
+   * `.d.ts` files.
+   */
   path: string
+
+  /**
+   * Removes the temporary directory (unless debug logging is enabled, in which
+   * case it is kept for inspection).
+   */
   dispose: () => Promise<void>
 }
 
+/**
+ * Runs `tsgo` to emit declaration files into a temporary directory. The
+ * caller is responsible for cleaning the directory up via
+ * {@linkcode TsgoContext.dispose | dispose()}.
+ *
+ * @param logger - A logger instance to log information about the `tsgo` execution.
+ * @param rootDir - The project root passed to `tsgo` via `--rootDir`.
+ * @param tsconfig - The path to the {@linkcode https://www.typescriptlang.org/docs/handbook/tsconfig-json.html | tsconfig.json} file passed via `-p`.
+ * @param [sourcemap] - If `true`, passes `--declarationMap` to emit `.d.ts.map` files.
+ * @param [tsgoPath] - Optional explicit path to the `tsgo` binary. Falls back to resolving from {@linkcode https://github.com/microsoft/typescript-go | @typescript/native-preview} in `node_modules`.
+ * @returns A {@linkcode TsgoContext} with the temporary directory path and a cleanup function.
+ */
 export async function runTsgo(
   logger: Logger,
   rootDir: string,
