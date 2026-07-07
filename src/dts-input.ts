@@ -2,9 +2,20 @@ import { RE_DTS, replaceTemplateName, resolveTemplateFn } from './filename.ts'
 import type { OptionsResolved } from './options.ts'
 import type { Plugin } from 'rolldown'
 
-export function createDtsInputPlugin({
-  sideEffects,
-}: Pick<OptionsResolved, 'sideEffects'>): Plugin {
+/**
+ * Creates the {@linkcode Plugin | Rolldown plugin} used when
+ * {@linkcode OptionsResolved.dtsInput | dtsInput} is `true`. Skips `.d.ts`
+ * generation and instead treats the input files as pre-existing declaration
+ * files to be bundled directly.
+ *
+ * @param resolvedOptions - Plugin options, used here to set `moduleSideEffects` for tree-shaking when {@linkcode OptionsResolved.sideEffects | sideEffects} is `false`.
+ * @returns A {@linkcode Plugin | Rolldown plugin} that configures the output to bundle `.d.ts` files directly from the input.
+ */
+export function createDtsInputPlugin(
+  resolvedOptions: Pick<OptionsResolved, 'sideEffects'>,
+): Plugin {
+  const { sideEffects } = resolvedOptions
+
   return {
     name: 'rolldown-plugin-dts:dts-input',
 

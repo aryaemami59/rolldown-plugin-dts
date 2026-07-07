@@ -35,55 +35,95 @@ const debug = createDebug('rolldown-plugin-dts:generate')
 const WORKER_URL = import.meta.WORKER_URL || './tsc/worker.ts'
 export const EMPTY_STUB = `export {}`
 
+/**
+ * A single source module tracked during `.d.ts` generation, holding its raw
+ * source alongside the metadata needed to decide whether and how to emit a
+ * declaration file for it. Stored as the value type of a {@linkcode DtsMap}.
+ */
 export interface TsModule {
-  /** `.ts` source code */
+  /**
+   * The raw TypeScript source code of the module.
+   */
   code: string
-  /** `.ts` file name */
+
+  /**
+   * The absolute path of the `.ts` source file.
+   */
   id: string
+
+  /**
+   * Whether this module is a build entry point that should emit a `.d.ts`
+   * chunk.
+   */
   isEntry: boolean
+
+  /**
+   * Whether the source module is a JavaScript file (as opposed to a
+   * TypeScript file), which affects whether an existing `.d.ts` on disk is
+   * reused instead of generating one.
+   */
   jsFile: boolean
 }
-/** dts filename -> ts module */
+
+/**
+ * A map of `.d.ts` file names to their corresponding TypeScript modules. This
+ * is used to track which `.d.ts` files have been generated for which source
+ * modules, and to resolve imports between `.d.ts` files back to their source
+ * modules when processing them with the TypeScript compiler.
+ */
 export type DtsMap = Map<string, TsModule>
 
-export function createGeneratePlugin({
-  generator,
-  entry,
-  tsconfig,
-  tsconfigRaw,
-  build,
-  incremental,
-  cwd,
-  oxc,
-  emitDtsOnly,
-  volarContext,
-  parallel,
-  eager,
-  tsgo,
-  newContext,
-  emitJs,
-  sourcemap,
-  logger,
-}: Pick<
-  OptionsResolved,
-  | 'generator'
-  | 'entry'
-  | 'cwd'
-  | 'tsconfig'
-  | 'tsconfigRaw'
-  | 'build'
-  | 'incremental'
-  | 'oxc'
-  | 'emitDtsOnly'
-  | 'volarContext'
-  | 'parallel'
-  | 'eager'
-  | 'tsgo'
-  | 'newContext'
-  | 'emitJs'
-  | 'sourcemap'
-  | 'logger'
->): Plugin {
+/**
+ * Creates the {@linkcode Plugin | Rolldown plugin} responsible for generating
+ * `.d.ts` declaration files from source modules. Depending on the resolved
+ * options it delegates to Oxc isolated declarations, `tsgo`, or the
+ * TypeScript compiler.
+ *
+ * @param resolvedOptions - Resolved plugin options that control how `.d.ts` files are generated (entry filtering, backend selection, source-map settings, etc.).
+ * @returns A {@linkcode Plugin | Rolldown plugin} that registers the transform and load hooks needed for `.d.ts` generation.
+ */
+export function createGeneratePlugin(
+  resolvedOptions: Pick<
+    OptionsResolved,
+    | 'generator'
+    | 'entry'
+    | 'cwd'
+    | 'tsconfig'
+    | 'tsconfigRaw'
+    | 'build'
+    | 'incremental'
+    | 'oxc'
+    | 'emitDtsOnly'
+    | 'volarContext'
+    | 'parallel'
+    | 'eager'
+    | 'tsgo'
+    | 'newContext'
+    | 'emitJs'
+    | 'sourcemap'
+    | 'logger'
+  >,
+): Plugin {
+  const {
+    generator,
+    entry,
+    tsconfig,
+    tsconfigRaw,
+    build,
+    incremental,
+    cwd,
+    oxc,
+    emitDtsOnly,
+    volarContext,
+    parallel,
+    eager,
+    tsgo,
+    newContext,
+    emitJs,
+    sourcemap,
+    logger,
+  } = resolvedOptions
+
   const entryIncludes = entry?.filter((p) => p[0] !== '!')
   const entryIgnores = entry?.filter((p) => p[0] === '!').map((p) => p.slice(1))
   const entryMatcher = entry
@@ -97,10 +137,13 @@ export function createGeneratePlugin({
    * A map of input id to output file name
    *
    * @example
+   * <caption>Map a resolved source path to its output name alias</caption>
    *
-   * inputAlias = new Map([
+   * ```ts
+   * const inputAliasMap = new Map([
    *   ['/absolute/path/to/src/source_file.ts', 'dist/foo/index'],
-   * ])
+   * ]);
+   * ```
    */
   const inputAliasMap = new Map<string, string>()
 
@@ -290,7 +333,7 @@ export function createGeneratePlugin({
             : Array.from(dtsMap.values())
                 .filter((v) => v.isEntry)
                 .map((v) => v.id)
-          const options: Omit<TscOptions, 'programs'> = {
+          const options: TscOptions = {
             tsconfig,
             tsconfigRaw,
             build,
@@ -436,6 +479,15 @@ function createTscWorker(): TscWorker {
   }
 }
 
+/**
+ * Parses a TypeScript declaration string emitted for a JSON module and returns
+ * a map of exported name to local binding name. Used to build a re-export
+ * shim when the emitted declarations use standard `export declare let` /
+ * `export { ... }` style output.
+ *
+ * @param code - The raw `.d.ts` code emitted by the TypeScript compiler for a JSON source file.
+ * @returns A map from exported name to local binding name.
+ */
 function collectJsonExportMap(code: string): Map<string, string> {
   const exportMap = new Map<string, string>()
   const { program } = parse(code, { sourceType: 'module', lang: 'dts' })
@@ -479,7 +531,14 @@ function collectJsonExportMap(code: string): Map<string, string> {
   return exportMap
 }
 
-/** `declare const _exports` mode */
+/**
+ * Parses a TypeScript declaration string emitted for a JSON module in
+ * `declare const _exports` mode and returns the list of exported member names.
+ * Used to build named re-export stubs for JSON files with non-identifier keys.
+ *
+ * @param code - The raw `.d.ts` code emitted by the TypeScript compiler for a JSON source file using `declare const _exports = { ... }` syntax.
+ * @returns An array of exported property names extracted from the declaration.
+ */
 function collectJsonExports(code: string) {
   const exports: string[] = []
   const { program } = parse(code, { sourceType: 'module', lang: 'dts' })

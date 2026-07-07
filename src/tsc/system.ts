@@ -1,13 +1,17 @@
 import { createDebug } from 'obug'
 import { requireTS } from './load-tsc.ts'
+import type { TscContext } from './context.ts'
 import type { System } from 'typescript'
 
 const debug = createDebug('rolldown-plugin-dts:tsc-system')
 const ts = requireTS()
 
 /**
- * A system that writes files to both memory and disk. It will try read files
- * from memory firstly and fallback to disk if not found.
+ * A system that writes files to both memory and disk. It will try to read
+ * files from memory first and fall back to disk if not found.
+ *
+ * @param files - In-memory file store shared with the {@linkcode TscContext | context}.
+ * @returns A {@linkcode ts.System | System} implementation backed by both memory and disk.
  */
 export function createFsSystem(files: Map<string, string>): System {
   return {
@@ -62,8 +66,14 @@ export function createFsSystem(files: Map<string, string>): System {
   }
 }
 
-// A system that only writes files to memory. It will read files from both
-// memory and disk.
+/**
+ * A system that writes files only to memory, never to disk. Reads from both
+ * memory and disk. Used when `incremental` is `false` to avoid leaving build
+ * artifacts on disk.
+ *
+ * @param files - In-memory file store shared with the {@linkcode TscContext | context}.
+ * @returns A {@linkcode System} implementation backed by memory only for writes.
+ */
 export function createMemorySystem(files: Map<string, string>): System {
   return {
     ...createFsSystem(files),
